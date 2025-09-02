@@ -12,6 +12,13 @@ class LogInterpreterUI {
         this.uploadArea = document.getElementById('upload-area');
         this.fileInput = document.getElementById('file-input');
         this.uploadBtn = document.getElementById('upload-btn');
+        
+        // Debug: Log element initialization
+        console.log('🔧 Elements initialized:', {
+            uploadArea: !!this.uploadArea,
+            fileInput: !!this.fileInput,
+            uploadBtn: !!this.uploadBtn
+        });
         this.fileInfo = document.getElementById('file-info');
         this.fileName = document.getElementById('file-name');
         this.fileSize = document.getElementById('file-size');
@@ -41,9 +48,19 @@ class LogInterpreterUI {
     }
 
     attachEventListeners() {
-        // File upload events
-        this.uploadArea.addEventListener('click', () => this.fileInput.click());
-        this.uploadBtn.addEventListener('click', () => this.fileInput.click());
+        // File upload events - simplified approach
+        this.uploadArea.addEventListener('click', (e) => {
+            // Don't trigger if clicking on the button itself
+            if (e.target !== this.uploadBtn && !this.uploadBtn.contains(e.target)) {
+                console.log('📤 Upload area clicked, opening file picker');
+                this.fileInput.click();
+            }
+        });
+        this.uploadBtn.addEventListener('click', (e) => {
+            console.log('🔘 Upload button clicked, opening file picker');
+            e.stopPropagation();
+            this.fileInput.click();
+        });
         this.fileInput.addEventListener('change', (e) => this.handleFileSelect(e));
         this.removeFileBtn.addEventListener('click', () => this.removeFile());
 
@@ -91,6 +108,8 @@ class LogInterpreterUI {
         }
     }
 
+
+
     handleDragOver(e) {
         e.preventDefault();
         this.uploadArea.classList.add('dragover');
@@ -112,24 +131,48 @@ class LogInterpreterUI {
     }
 
     handleFileSelect(e) {
+        console.log('📂 File input change event triggered');
         const file = e.target.files[0];
-        if (!file) return;
+        if (!file) {
+            console.log('❌ No file selected from file input');
+            return;
+        }
+
+        console.log('📁 File selected:', file.name, file.size, 'bytes', 'Type:', file.type);
+
+        // Prevent multiple uploads of the same file
+        if (this.isProcessing) {
+            console.log('Upload already in progress, ignoring duplicate');
+            return;
+        }
+
+        // Check if this is the same file already uploaded successfully
+        if (this.currentFile && this.currentFile.name === file.name && 
+            this.currentFile.size === file.size && 
+            this.fileInfo.style.display === 'block' && 
+            !this.chatInput.disabled) {
+            console.log('Same file already uploaded successfully, ignoring duplicate');
+            return;
+        }
 
         // Validate file type
-        const allowedTypes = ['.txt', '.log', '.csv', '.json', '.md'];
+        const allowedTypes = ['.txt', '.log', '.csv', '.json', '.md', '.pdf', '.doc', '.docx'];
         const fileExtension = '.' + file.name.split('.').pop().toLowerCase();
         
         if (!allowedTypes.includes(fileExtension)) {
             this.showError('Unsupported file type. Please upload: ' + allowedTypes.join(', '));
+            this.fileInput.value = ''; // Clear the invalid file
             return;
         }
 
         // Validate file size (10MB limit)
         if (file.size > 10 * 1024 * 1024) {
             this.showError('File size must be less than 10MB');
+            this.fileInput.value = ''; // Clear the invalid file
             return;
         }
 
+        console.log('✅ File validation passed, starting upload process');
         this.currentFile = file;
         this.displayFileInfo(file);
         this.uploadFile(file);
@@ -151,6 +194,8 @@ class LogInterpreterUI {
     }
 
     async uploadFile(file) {
+        console.log('🚀 Starting upload for:', file.name);
+        
         const formData = new FormData();
         formData.append('file', file);
         formData.append('embeddingProvider', this.embeddingProvider.value);
@@ -160,29 +205,46 @@ class LogInterpreterUI {
         this.setProcessing(true, 'Processing file upload...');
 
         try {
+            console.log('📡 Sending upload request...');
             const response = await fetch('/api/upload', {
                 method: 'POST',
                 body: formData
             });
 
+            console.log('📨 Response received:', response.status, response.statusText);
+
             if (!response.ok) {
                 const error = await response.json();
+                console.error('❌ Server error:', error);
                 throw new Error(error.error || 'Upload failed');
             }
 
             const result = await response.json();
+            console.log('✅ Upload successful:', result);
+            
             this.hideProgress();
-            this.setProcessing(false); // Clear the processing state
+            this.setProcessing(false);
+            
+            // Ensure the file info shows the successful upload
+            this.uploadArea.style.display = 'none';
+            this.fileInfo.style.display = 'block';
+            
             this.enableChat();
             
             const timeText = result.processingTime ? ` in ${result.processingTime.toFixed(1)}s` : '';
             this.showSuccess(`File uploaded successfully! Loaded ${result.chunks} chunks${timeText}.`);
             
         } catch (error) {
+            console.error('❌ Upload failed:', error);
             this.hideProgress();
             this.setProcessing(false);
-            this.showError('Upload failed: ' + error.message);
-            this.removeFile();
+            this.showUploadError('Upload failed: ' + error.message);
+            
+            // Reset UI to allow retry
+            this.uploadArea.style.display = 'block';
+            this.fileInfo.style.display = 'none';
+            this.uploadArea.style.cursor = 'pointer';
+            this.uploadArea.title = 'Click to retry upload or drag a new file';
         }
     }
 
@@ -229,11 +291,21 @@ class LogInterpreterUI {
         this.setProcessing(false);
     }
 
+    retryUpload() {
+        if (this.currentFile && !this.isProcessing) {
+            console.log('Retrying upload for:', this.currentFile.name);
+            this.displayFileInfo(this.currentFile);
+            this.uploadFile(this.currentFile);
+        }
+    }
+
     enableChat() {
+        console.log('💬 Enabling chat for file:', this.currentFile?.name);
         this.chatInput.disabled = false;
         this.sendBtn.disabled = false;
         this.fileStatus.textContent = `File: ${this.currentFile.name}`;
         this.chatInput.placeholder = 'Ask a question about your file...';
+        console.log('✅ Chat enabled successfully');
     }
 
     disableChat() {
@@ -341,9 +413,20 @@ class LogInterpreterUI {
     }
 
     setProcessing(isProcessing, message = 'Processing your question...') {
+        console.log('🔄 setProcessing called:', { isProcessing, currentFile: this.currentFile?.name, message });
+        
         this.isProcessing = isProcessing;
-        this.sendBtn.disabled = isProcessing || !this.currentFile;
-        this.chatInput.disabled = isProcessing || !this.currentFile;
+        
+        // Only disable chat controls if actively processing OR no file is loaded
+        const shouldDisable = isProcessing || !this.currentFile;
+        this.sendBtn.disabled = shouldDisable;
+        this.chatInput.disabled = shouldDisable;
+        
+        console.log('🎛️ Chat controls:', { 
+            sendBtnDisabled: this.sendBtn.disabled, 
+            chatInputDisabled: this.chatInput.disabled,
+            shouldDisable 
+        });
         
         if (isProcessing) {
             this.loadingOverlay.style.display = 'flex';
@@ -367,6 +450,12 @@ class LogInterpreterUI {
 
     showSuccess(message) {
         this.addMessage(message, 'assistant');
+    }
+
+    showUploadError(message) {
+        // Show error with retry option for upload failures
+        const errorWithRetry = `${message}\n\nClick the upload area to try again, or use the remove button to select a different file.`;
+        this.addMessage(errorWithRetry, 'error');
     }
 }
 
