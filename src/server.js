@@ -54,21 +54,24 @@ class LogInterpreterServer {
                 fileSize: 10 * 1024 * 1024, // 10MB limit
             },
             fileFilter: (req, file, cb) => {
-                // Allow only text-based files
+                // Allow text-based files, PDFs, and Word documents
                 const allowedMimes = [
                     'text/plain',
                     'text/csv',
                     'application/json',
-                    'text/markdown'
+                    'text/markdown',
+                    'application/pdf',
+                    'application/msword',
+                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
                 ];
                 
-                const allowedExts = ['.txt', '.log', '.csv', '.json', '.md'];
+                const allowedExts = ['.txt', '.log', '.csv', '.json', '.md', '.pdf', '.doc', '.docx'];
                 const fileExt = path.extname(file.originalname).toLowerCase();
                 
                 if (allowedMimes.includes(file.mimetype) || allowedExts.includes(fileExt)) {
                     cb(null, true);
                 } else {
-                    cb(new Error('Unsupported file type'), false);
+                    cb(new Error('Unsupported file type. Supported formats: TXT, LOG, CSV, JSON, MD, PDF, DOC, DOCX'), false);
                 }
             }
         });

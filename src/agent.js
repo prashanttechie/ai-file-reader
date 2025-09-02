@@ -12,6 +12,8 @@ import { Document } from '@langchain/core/documents';
 import fs from 'fs/promises';
 import path from 'path';
 import dotenv from 'dotenv';
+import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
+import mammoth from 'mammoth';
 
 // Load environment variables
 dotenv.config();
@@ -247,12 +249,94 @@ Based on the context above, provide a clear and accurate answer. If the context 
     });
   }
 
+  async extractTextContent(filePath) {
+    const fileExtension = path.extname(filePath).toLowerCase();
+    
+    switch (fileExtension) {
+      case '.pdf':
+        return await this.extractPdfText(filePath);
+      case '.doc':
+      case '.docx':
+        return await this.extractWordText(filePath);
+      case '.txt':
+      case '.log':
+      case '.csv':
+      case '.json':
+      case '.md':
+      default:
+        // Read as plain text for standard text files
+        return await fs.readFile(filePath, 'utf-8');
+    }
+  }
+
+  async extractPdfText(filePath) {
+    try {
+      console.log(`📄 Extracting text from PDF: ${path.basename(filePath)}`);
+      const dataBuffer = await fs.readFile(filePath);
+      
+      // Convert Buffer to Uint8Array for pdfjs-dist
+      const uint8Array = new Uint8Array(dataBuffer);
+      
+      // Load the PDF document
+      const loadingTask = pdfjs.getDocument({ data: uint8Array });
+      const pdf = await loadingTask.promise;
+      
+      let text = '';
+      
+      // Extract text from each page
+      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+        const page = await pdf.getPage(pageNum);
+        const textContent = await page.getTextContent();
+        
+        // Combine text items from the page
+        const pageText = textContent.items
+          .map(item => item.str)
+          .join(' ');
+        
+        text += pageText + '\n';
+      }
+      
+      if (!text || !text.trim()) {
+        throw new Error('PDF appears to be empty or contains no extractable text');
+      }
+      
+      console.log(`✅ Extracted ${text.length} characters from PDF (${pdf.numPages} pages)`);
+      return text;
+    } catch (error) {
+      console.error(`❌ Error extracting PDF text: ${error.message}`);
+      throw new Error(`Failed to extract text from PDF: ${error.message}`);
+    }
+  }
+
+  async extractWordText(filePath) {
+    try {
+      console.log(`📝 Extracting text from Word document: ${path.basename(filePath)}`);
+      const dataBuffer = await fs.readFile(filePath);
+      const result = await mammoth.extractRawText({ buffer: dataBuffer });
+      
+      if (!result.value || !result.value.trim()) {
+        throw new Error('Word document appears to be empty or contains no extractable text');
+      }
+      
+      // Log any warnings from mammoth
+      if (result.messages && result.messages.length > 0) {
+        console.log(`⚠️ Word extraction warnings:`, result.messages.map(m => m.message));
+      }
+      
+      console.log(`✅ Extracted ${result.value.length} characters from Word document`);
+      return result.value;
+    } catch (error) {
+      console.error(`❌ Error extracting Word text: ${error.message}`);
+      throw new Error(`Failed to extract text from Word document: ${error.message}`);
+    }
+  }
+
   async loadFileToVectorStore(filePath) {
     try {
       console.log(`📖 Reading file: ${filePath}`);
       
-      // Read file content
-      const content = await fs.readFile(filePath, 'utf-8');
+      // Extract text content based on file type
+      const content = await this.extractTextContent(filePath);
       
       if (!content.trim()) {
         throw new Error('File is empty or contains only whitespace');
