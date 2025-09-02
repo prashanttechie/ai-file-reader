@@ -1,0 +1,54 @@
+# Use Node.js 18 LTS as base image
+FROM node:18-slim
+
+# Install required system dependencies
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
+    build-essential \
+    libc6-dev \
+    libgcc-s1 \
+    libstdc++6 \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+
+# Create uploads directory
+RUN mkdir -p uploads
+
+# Copy package files
+COPY package*.json ./
+
+# Install dependencies
+RUN npm ci --only=production
+
+# Copy application files
+COPY . .
+
+# Make entrypoint script executable
+RUN chmod +x /app/scripts/docker-entrypoint.sh
+
+# Create non-root user for security
+RUN groupadd -r nodejs && useradd -r -g nodejs nodejs
+
+# Change ownership of app directory and uploads
+RUN chown -R nodejs:nodejs /app
+RUN chmod -R 755 /app/uploads
+
+# Switch to non-root user
+USER nodejs
+
+# Expose port 3000
+EXPOSE 3000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD node -e "require('http').get('http://localhost:3000/api/status', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"
+
+# Set entrypoint
+ENTRYPOINT ["/app/scripts/docker-entrypoint.sh"]
+
+# Start the application
+CMD ["npm", "run", "ui"]
