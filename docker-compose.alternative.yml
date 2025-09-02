@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  # Option 1: Alpine-based with ONNX fixes (default)
+  log-interpreter-agent:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: log-interpreter-agent
+    profiles: ["alpine"]
+    ports:
+      - "3000:3000"
+    environment:
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - PINECONE_API_KEY=${PINECONE_API_KEY}
+      - PINECONE_ENVIRONMENT=${PINECONE_ENVIRONMENT:-gcp-starter}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER:-simple}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-simple}
+      - GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}
+      - PINECONE_INDEX_NAME=${PINECONE_INDEX_NAME:-log-interpreter-index}
+      - NODE_ENV=${NODE_ENV:-production}
+      - PORT=3000
+    volumes:
+      - ./uploads:/app/uploads
+    restart: unless-stopped
+
+  # Option 2: Debian-based for better compatibility
+  log-interpreter-agent-debian:
+    build: 
+      context: .
+      dockerfile: Dockerfile.debian
+    container_name: log-interpreter-agent-debian
+    profiles: ["debian"]
+    ports:
+      - "3000:3000"
+    environment:
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - PINECONE_API_KEY=${PINECONE_API_KEY}
+      - PINECONE_ENVIRONMENT=${PINECONE_ENVIRONMENT:-gcp-starter}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER:-huggingface}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-Xenova/all-MiniLM-L6-v2}
+      - GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}
+      - PINECONE_INDEX_NAME=${PINECONE_INDEX_NAME:-log-interpreter-index}
+      - NODE_ENV=${NODE_ENV:-production}
+      - PORT=3000
+    volumes:
+      - ./uploads:/app/uploads
+    restart: unless-stopped
+
+  # Option 3: OpenAI embeddings (most reliable)
+  log-interpreter-agent-openai:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: log-interpreter-agent-openai
+    profiles: ["openai"]
+    ports:
+      - "3000:3000"
+    environment:
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - PINECONE_API_KEY=${PINECONE_API_KEY}
+      - PINECONE_ENVIRONMENT=${PINECONE_ENVIRONMENT:-gcp-starter}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - EMBEDDING_PROVIDER=openai
+      - EMBEDDING_MODEL=text-embedding-ada-002
+      - GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}
+      - PINECONE_INDEX_NAME=${PINECONE_INDEX_NAME:-log-interpreter-index}
+      - NODE_ENV=${NODE_ENV:-production}
+      - PORT=3000
+    volumes:
+      - ./uploads:/app/uploads
+    restart: unless-stopped
