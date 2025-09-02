@@ -12,7 +12,7 @@ import { Document } from '@langchain/core/documents';
 import fs from 'fs/promises';
 import path from 'path';
 import dotenv from 'dotenv';
-import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
+import pdfParse from 'pdf-parse';
 import mammoth from 'mammoth';
 
 // Load environment variables
@@ -274,34 +274,15 @@ Based on the context above, provide a clear and accurate answer. If the context 
       console.log(`📄 Extracting text from PDF: ${path.basename(filePath)}`);
       const dataBuffer = await fs.readFile(filePath);
       
-      // Convert Buffer to Uint8Array for pdfjs-dist
-      const uint8Array = new Uint8Array(dataBuffer);
+      // Use pdf-parse to extract text
+      const data = await pdfParse(dataBuffer);
       
-      // Load the PDF document
-      const loadingTask = pdfjs.getDocument({ data: uint8Array });
-      const pdf = await loadingTask.promise;
-      
-      let text = '';
-      
-      // Extract text from each page
-      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-        const page = await pdf.getPage(pageNum);
-        const textContent = await page.getTextContent();
-        
-        // Combine text items from the page
-        const pageText = textContent.items
-          .map(item => item.str)
-          .join(' ');
-        
-        text += pageText + '\n';
-      }
-      
-      if (!text || !text.trim()) {
+      if (!data.text || !data.text.trim()) {
         throw new Error('PDF appears to be empty or contains no extractable text');
       }
       
-      console.log(`✅ Extracted ${text.length} characters from PDF (${pdf.numPages} pages)`);
-      return text;
+      console.log(`✅ Extracted ${data.text.length} characters from PDF (${data.numpages} pages)`);
+      return data.text;
     } catch (error) {
       console.error(`❌ Error extracting PDF text: ${error.message}`);
       throw new Error(`Failed to extract text from PDF: ${error.message}`);
