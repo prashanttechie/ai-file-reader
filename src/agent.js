@@ -243,7 +243,7 @@ Based on the context above, provide a clear and accurate answer. If the context 
 
     this.retrievalChain = await createRetrievalChain({
       retriever: this.vectorStore.asRetriever({
-        k: 5, // Number of documents to retrieve
+        k: 20 // Much higher number of documents to retrieve
       }),
       combineDocsChain: documentChain,
     });
@@ -357,6 +357,12 @@ Based on the context above, provide a clear and accurate answer. If the context 
       }
       
       console.log(`✅ Successfully loaded file: ${filePath}`);
+      
+      // Wait for Pinecone index to be ready for queries (eventual consistency)
+      console.log('⏳ Waiting for vector index to be ready...');
+      await new Promise(resolve => setTimeout(resolve, 3000)); // 3 second delay
+      console.log('✅ Vector index should be ready for queries');
+      
       return documents.length;
     } catch (error) {
       console.error(`❌ Error loading file ${filePath}:`, error.message);
@@ -372,9 +378,41 @@ Based on the context above, provide a clear and accurate answer. If the context 
     try {
       console.log(`🤔 Processing question: ${question}`);
       
+      // Debug: Check if we have documents in the vector store
+      console.log('🔍 Testing different retrieval methods...');
+      
+      // Try basic retrieval first
+      const basicRetriever = this.vectorStore.asRetriever({ k: 20 });
+      const basicDocs = await basicRetriever.getRelevantDocuments(question);
+      console.log(`🔍 Basic retrieval found ${basicDocs.length} relevant documents`);
+      
+      // Try similarity search directly on the vector store
+      try {
+        const similarityDocs = await this.vectorStore.similaritySearch(question, 10);
+        console.log(`🔍 Direct similarity search found ${similarityDocs.length} documents`);
+        
+        if (similarityDocs.length > 0) {
+          console.log(`📝 First similarity doc preview: ${similarityDocs[0].pageContent.substring(0, 100)}...`);
+        }
+      } catch (error) {
+        console.error('❌ Similarity search error:', error.message);
+      }
+      
+      // Use the docs from whichever method found results
+      const relevantDocs = basicDocs.length > 0 ? basicDocs : [];
+      console.log(`🔍 Using ${relevantDocs.length} documents for final retrieval`);
+      
+      if (relevantDocs.length === 0) {
+        console.warn('⚠️ No relevant documents found in vector store');
+      } else {
+        console.log(`📝 First doc preview: ${relevantDocs[0].pageContent.substring(0, 100)}...`);
+      }
+      
       const result = await this.retrievalChain.invoke({
         input: question,
       });
+
+      console.log(`💬 LLM Response length: ${result.answer?.length || 0} characters`);
 
       return {
         answer: result.answer,
