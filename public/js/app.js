@@ -282,7 +282,32 @@ class LogInterpreterUI {
         }, 500);
     }
 
-    removeFile() {
+    async removeFile() {
+        console.log('🗑️ Removing file:', this.currentFile?.name);
+        
+        // Call the API to remove the file from server and clear vector store
+        try {
+            const response = await fetch('/api/remove-file', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                console.log('✅ File removed from server:', result.message);
+                this.addMessage(result.message, 'assistant');
+            } else {
+                console.warn('⚠️ Failed to remove file from server');
+                this.addMessage('Warning: Failed to remove file from server', 'error');
+            }
+        } catch (error) {
+            console.error('❌ Error removing file from server:', error);
+            this.addMessage('Error: Could not remove file from server', 'error');
+        }
+
+        // Clear UI state
         this.currentFile = null;
         this.uploadArea.style.display = 'block';
         this.fileInfo.style.display = 'none';
@@ -394,7 +419,37 @@ class LogInterpreterUI {
         this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
     }
 
-    clearChat() {
+    async clearChat() {
+        console.log('🧹 Clearing chat and session');
+        
+        // Call the API to clear session (removes file + vector store)
+        try {
+            const response = await fetch('/api/clear', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                console.log('✅ Session cleared:', result.message);
+            } else {
+                console.warn('⚠️ Failed to clear session on server');
+            }
+        } catch (error) {
+            console.error('❌ Error clearing session:', error);
+        }
+
+        // Clear UI state
+        this.currentFile = null;
+        this.uploadArea.style.display = 'block';
+        this.fileInfo.style.display = 'none';
+        this.fileInput.value = '';
+        this.disableChat();
+        this.setProcessing(false);
+
+        // Clear chat messages
         this.chatMessages.innerHTML = `
             <div class="welcome-message">
                 <i class="fas fa-info-circle"></i>
