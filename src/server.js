@@ -205,7 +205,31 @@ class LogInterpreterServer {
             }
         });
 
-        // Clear current file endpoint
+        // Remove current file endpoint (just file, no vector store clearing)
+        this.app.post('/api/remove-file', async (req, res) => {
+            try {
+                if (this.currentFile) {
+                    // Clean up uploaded file
+                    try {
+                        await fs.unlink(this.currentFile);
+                        console.log(`🗑️ Removed uploaded file: ${this.currentFile}`);
+                        this.currentFile = null;
+                        res.json({ success: true, message: 'File removed from server successfully' });
+                    } catch (error) {
+                        console.warn('Could not delete file:', error.message);
+                        res.status(500).json({ error: `Failed to delete file: ${error.message}` });
+                    }
+                } else {
+                    res.json({ success: true, message: 'No file to remove' });
+                }
+
+            } catch (error) {
+                console.error('❌ File removal error:', error.message);
+                res.status(500).json({ error: error.message });
+            }
+        });
+
+        // Clear current file endpoint (file + vector store + chat)
         this.app.post('/api/clear', async (req, res) => {
             try {
                 if (this.currentFile) {
@@ -225,7 +249,7 @@ class LogInterpreterServer {
                     console.log('🗑️ Vector store cleared');
                 }
 
-                res.json({ success: true, message: 'Session cleared' });
+                res.json({ success: true, message: 'Session cleared completely' });
 
             } catch (error) {
                 console.error('❌ Clear error:', error.message);
