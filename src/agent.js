@@ -403,6 +403,91 @@ Based on the context above, provide a clear and accurate answer. If the context 
       throw error;
     }
   }
+
+  async recreateIndex() {
+    try {
+      const baseIndexName = process.env.PINECONE_INDEX_NAME || 'log-interpreter-index';
+      const indexName = this.getProviderSpecificIndexName(baseIndexName);
+      
+      console.log(`🗑️ Deleting existing Pinecone index: ${indexName}`);
+      
+      // Check if index exists and delete it
+      const indexList = await this.pineconeClient.listIndexes();
+      const indexExists = indexList.indexes?.some(index => index.name === indexName);
+      
+      if (indexExists) {
+        await this.pineconeClient.deleteIndex(indexName);
+        console.log(`✅ Index ${indexName} deleted successfully`);
+        
+        // Wait for deletion to complete
+        let deleted = false;
+        let attempts = 0;
+        const maxAttempts = 30; // 30 seconds max wait
+        
+        while (!deleted && attempts < maxAttempts) {
+          await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+          const currentIndexList = await this.pineconeClient.listIndexes();
+          deleted = !currentIndexList.indexes?.some(index => index.name === indexName);
+          attempts++;
+        }
+        
+        if (!deleted) {
+          throw new Error(`Index deletion timed out after ${maxAttempts} seconds`);
+        }
+      }
+      
+      // Create new index
+      const dimension = this.getEmbeddingDimension();
+      const embeddingProvider = process.env.EMBEDDING_PROVIDER || 'openai';
+      
+      console.log(`📦 Creating new Pinecone index: ${indexName}`);
+      console.log(`🔧 Using ${dimension} dimensions for ${embeddingProvider} embeddings`);
+      
+      await this.pineconeClient.createIndex({
+        name: indexName,
+        dimension: dimension,
+        metric: 'cosine',
+        spec: {
+          serverless: {
+            cloud: 'aws',
+            region: 'us-east-1'
+          }
+        }
+      });
+      
+      // Wait for index to be ready
+      let ready = false;
+      let readyAttempts = 0;
+      const maxReadyAttempts = 60; // 60 seconds max wait
+      
+      while (!ready && readyAttempts < maxReadyAttempts) {
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+        const indexList = await this.pineconeClient.listIndexes();
+        const indexInfo = indexList.indexes?.find(index => index.name === indexName);
+        ready = indexInfo?.status?.ready === true;
+        readyAttempts++;
+      }
+      
+      if (!ready) {
+        throw new Error(`Index creation timed out after ${maxReadyAttempts} seconds`);
+      }
+      
+      console.log(`✅ Index ${indexName} created and ready`);
+      
+      // Reinitialize vector store with new index
+      const index = this.pineconeClient.Index(indexName);
+      this.vectorStore = await PineconeStore.fromExistingIndex(this.embeddings, {
+        pineconeIndex: index,
+        textKey: 'text',
+      });
+      
+      console.log('✅ Vector store reinitialized with new index');
+      
+    } catch (error) {
+      console.error('❌ Error recreating index:', error.message);
+      throw error;
+    }
+  }
 }
 
 // Example usage
