@@ -111,6 +111,17 @@ class LogInterpreterServer {
                 // Reinitialize agent with new configuration if needed
                 await this.reinitializeAgent();
 
+                // Recreate Pinecone index before uploading new file
+                if (this.agent) {
+                    try {
+                        await this.agent.recreateIndex();
+                        console.log('🔄 Pinecone index recreated for new upload');
+                    } catch (error) {
+                        console.warn('Could not recreate index before upload:', error.message);
+                        // Don't fail the upload if index recreation fails, try to continue
+                    }
+                }
+
                 // Load the file into the agent
                 const filePath = req.file.path;
                 
@@ -205,7 +216,7 @@ class LogInterpreterServer {
             }
         });
 
-        // Remove current file endpoint (just file, no vector store clearing)
+        // Remove current file endpoint (just file - index gets recreated on next upload)
         this.app.post('/api/remove-file', async (req, res) => {
             try {
                 if (this.currentFile) {
@@ -214,13 +225,19 @@ class LogInterpreterServer {
                         await fs.unlink(this.currentFile);
                         console.log(`🗑️ Removed uploaded file: ${this.currentFile}`);
                         this.currentFile = null;
-                        res.json({ success: true, message: 'File removed from server successfully' });
+                        res.json({ 
+                            success: true, 
+                            message: 'File removed from server successfully (index will be recreated on next upload)' 
+                        });
                     } catch (error) {
                         console.warn('Could not delete file:', error.message);
                         res.status(500).json({ error: `Failed to delete file: ${error.message}` });
                     }
                 } else {
-                    res.json({ success: true, message: 'No file to remove' });
+                    res.json({ 
+                        success: true, 
+                        message: 'No file to remove' 
+                    });
                 }
 
             } catch (error) {
@@ -229,7 +246,7 @@ class LogInterpreterServer {
             }
         });
 
-        // Clear current file endpoint (file + vector store + chat)
+        // Clear current file endpoint (just file - index gets recreated on next upload)
         this.app.post('/api/clear', async (req, res) => {
             try {
                 if (this.currentFile) {
@@ -237,19 +254,16 @@ class LogInterpreterServer {
                     try {
                         await fs.unlink(this.currentFile);
                         console.log(`🗑️ Cleaned up file: ${this.currentFile}`);
+                        this.currentFile = null;
                     } catch (error) {
                         console.warn('Could not delete file:', error.message);
                     }
-                    this.currentFile = null;
                 }
 
-                // Clear vector store
-                if (this.agent) {
-                    await this.agent.clearVectorStore();
-                    console.log('🗑️ Vector store cleared');
-                }
-
-                res.json({ success: true, message: 'Session cleared completely' });
+                res.json({ 
+                    success: true, 
+                    message: 'Session cleared (index will be recreated on next upload)' 
+                });
 
             } catch (error) {
                 console.error('❌ Clear error:', error.message);

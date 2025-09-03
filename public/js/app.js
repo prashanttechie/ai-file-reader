@@ -298,6 +298,14 @@ class LogInterpreterUI {
                 const result = await response.json();
                 console.log('✅ File removed from server:', result.message);
                 this.addMessage(result.message, 'assistant');
+                
+                // Show warnings if any
+                if (result.warnings && result.warnings.length > 0) {
+                    result.warnings.forEach(warning => {
+                        console.warn('⚠️ Warning:', warning);
+                        this.addMessage(`Warning: ${warning}`, 'warning');
+                    });
+                }
             } else {
                 console.warn('⚠️ Failed to remove file from server');
                 this.addMessage('Warning: Failed to remove file from server', 'error');
