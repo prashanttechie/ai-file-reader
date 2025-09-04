@@ -16,7 +16,7 @@ scrape_configs:
           - localhost
         labels:
           job: ai-file-reader
-          __path__: /var/log/ai-file-reader.log
+          __path__: /var/log/app/ai-file-reader.log
 
   # Collect Docker container logs with proper configuration
   - job_name: docker-logs
