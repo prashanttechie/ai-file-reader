@@ -6,6 +6,7 @@ import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
 import { LogInterpreterAgent } from './agent.js';
 import dotenv from 'dotenv';
+import { register as metricsRegister, metrics, collectHttpMetrics } from './metrics.js';
 
 // Load environment variables
 dotenv.config();
@@ -19,6 +20,7 @@ class LogInterpreterServer {
         this.port = process.env.PORT || 3000;
         this.agent = null;
         this.currentFile = null;
+        this.processingStatus = null;
         
         this.setupMiddleware();
         this.setupRoutes();
@@ -34,6 +36,9 @@ class LogInterpreterServer {
         
         // Serve static files
         this.app.use(express.static(path.join(__dirname, '../public')));
+        
+        // Add metrics collection middleware
+        this.app.use(collectHttpMetrics);
         
         // Setup file upload middleware
         const storage = multer.diskStorage({
@@ -88,12 +93,31 @@ class LogInterpreterServer {
             });
         });
 
+        // Prometheus metrics endpoint
+        console.log('🔧 Registering /metrics endpoint...');
+        this.app.get('/metrics', async (req, res) => {
+            console.log('📊 Metrics endpoint accessed');
+            try {
+                res.set('Content-Type', metricsRegister.contentType);
+                res.end(await metricsRegister.metrics());
+            } catch (error) {
+                console.error('Error generating metrics:', error);
+                res.status(500).end('Error generating metrics');
+            }
+        });
+
         // File upload endpoint
         this.app.post('/api/upload', this.upload.single('file'), async (req, res) => {
+            const uploadStartTime = Date.now();
+            const fileType = req.file ? path.extname(req.file.originalname).toLowerCase() : 'unknown';
+            
             try {
                 if (!req.file) {
+                    metrics.fileUploadsTotal.labels(fileType, 'failed').inc();
                     return res.status(400).json({ error: 'No file uploaded' });
                 }
+                
+                metrics.fileUploadsTotal.labels(fileType, 'started').inc();
 
                 const { embeddingProvider, groqModel } = req.body;
                 
@@ -111,43 +135,37 @@ class LogInterpreterServer {
                 // Reinitialize agent with new configuration if needed
                 await this.reinitializeAgent();
 
-                // Recreate Pinecone index before uploading new file
-                if (this.agent) {
-                    try {
-                        await this.agent.recreateIndex();
-                        console.log('🔄 Pinecone index recreated for new upload');
-                    } catch (error) {
-                        console.warn('Could not recreate index before upload:', error.message);
-                        // Don't fail the upload if index recreation fails, try to continue
-                    }
-                }
-
-                // Load the file into the agent
-                const filePath = req.file.path;
+                // Generate a unique processing ID
+                const processingId = `upload_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
                 
-                // Start timing
-                const startTime = Date.now();
-                const chunks = await this.agent.loadFileToVectorStore(filePath);
-                const endTime = Date.now();
-                const processingTime = (endTime - startTime) / 1000;
-                
-                // Store current file info
-                this.currentFile = filePath;
+                // Set initial processing status
+                this.processingStatus = {
+                    id: processingId,
+                    status: 'processing',
+                    filename: req.file.originalname,
+                    startTime: uploadStartTime,
+                    stage: 'initializing',
+                    progress: 0
+                };
 
-                console.log(`✅ File processed: ${chunks} chunks loaded in ${processingTime}s`);
-
+                // Return immediately with processing ID
                 res.json({
                     success: true,
+                    processingId: processingId,
                     filename: req.file.originalname,
-                    chunks: chunks,
                     size: req.file.size,
-                    processingTime: processingTime,
-                    embeddingProvider: embeddingProvider,
-                    groqModel: groqModel
+                    status: 'processing',
+                    message: 'File upload started. Processing in background...'
                 });
+
+                // Process file in background
+                this.processFileInBackground(req.file, embeddingProvider, groqModel, processingId, uploadStartTime, fileType);
 
             } catch (error) {
                 console.error('❌ Upload error:', error.message);
+                
+                // Record failed upload metrics
+                metrics.fileUploadsTotal.labels(fileType, 'failed').inc();
                 
                 // Clean up uploaded file on error
                 if (req.file) {
@@ -165,8 +183,21 @@ class LogInterpreterServer {
             }
         });
 
+        // Processing status endpoint
+        this.app.get('/api/upload-status/:processingId', (req, res) => {
+            const { processingId } = req.params;
+            
+            if (!this.processingStatus || this.processingStatus.id !== processingId) {
+                return res.status(404).json({ error: 'Processing ID not found' });
+            }
+            
+            res.json(this.processingStatus);
+        });
+
         // Query endpoint
         this.app.post('/api/query', async (req, res) => {
+            const queryStartTime = Date.now();
+            
             try {
                 const { question, embeddingProvider, groqModel } = req.body;
 
@@ -200,6 +231,11 @@ class LogInterpreterServer {
 
                 console.log(`✅ Query completed`);
 
+                // Record successful query metrics
+                const queryTime = (Date.now() - queryStartTime) / 1000;
+                metrics.queryResponseTime.labels('document_query').observe(queryTime);
+                metrics.llmRequests.labels(groqModel || process.env.GROQ_MODEL || 'unknown', 'success').inc();
+
                 res.json({
                     answer: result.answer,
                     sources: result.sources,
@@ -209,6 +245,10 @@ class LogInterpreterServer {
 
             } catch (error) {
                 console.error('❌ Query error:', error.message);
+                
+                // Record failed query metrics
+                metrics.llmRequests.labels(groqModel || process.env.GROQ_MODEL || 'unknown', 'failed').inc();
+                
                 res.status(500).json({
                     error: error.message,
                     details: this.getErrorDetails(error)
@@ -330,6 +370,96 @@ class LogInterpreterServer {
         // In a production environment, you might want to implement smarter reinitialization
         if (!this.agent) {
             await this.initializeAgent();
+        }
+    }
+
+    async processFileInBackground(file, embeddingProvider, groqModel, processingId, uploadStartTime, fileType) {
+        try {
+            // Update status: recreating index
+            this.processingStatus.stage = 'recreating_index';
+            this.processingStatus.progress = 10;
+            
+            // Recreate Pinecone index before uploading new file
+            if (this.agent) {
+                try {
+                    await this.agent.recreateIndex();
+                    console.log('🔄 Pinecone index recreated for new upload');
+                } catch (error) {
+                    console.warn('Could not recreate index before upload:', error.message);
+                    // Don't fail the upload if index recreation fails, try to continue
+                }
+            }
+
+            // Update status: processing file
+            this.processingStatus.stage = 'processing_file';
+            this.processingStatus.progress = 30;
+
+            // Load the file into the agent
+            const filePath = file.path;
+            
+            // Start timing
+            const startTime = Date.now();
+            
+            // Update status: loading to vector store
+            this.processingStatus.stage = 'loading_to_vector_store';
+            this.processingStatus.progress = 50;
+            
+            const chunks = await this.agent.loadFileToVectorStore(filePath);
+            const endTime = Date.now();
+            const processingTime = (endTime - startTime) / 1000;
+            
+            // Update status: finalizing
+            this.processingStatus.stage = 'finalizing';
+            this.processingStatus.progress = 90;
+            
+            // Store current file info
+            this.currentFile = filePath;
+
+            console.log(`✅ File processed: ${chunks} chunks loaded in ${processingTime}s`);
+
+            // Record successful upload metrics
+            const totalProcessingTime = (Date.now() - uploadStartTime) / 1000;
+            metrics.fileProcessingDuration.labels(fileType).observe(totalProcessingTime);
+            metrics.fileUploadsTotal.labels(fileType, 'success').inc();
+            metrics.documentsInVectorStore.set(chunks);
+
+            // Update status: completed
+            this.processingStatus = {
+                ...this.processingStatus,
+                status: 'completed',
+                stage: 'completed',
+                progress: 100,
+                chunks: chunks,
+                processingTime: processingTime,
+                totalTime: totalProcessingTime,
+                embeddingProvider: embeddingProvider,
+                groqModel: groqModel,
+                completedAt: Date.now()
+            };
+
+        } catch (error) {
+            console.error('❌ Background processing error:', error.message);
+            
+            // Record failed upload metrics
+            metrics.fileUploadsTotal.labels(fileType, 'failed').inc();
+            
+            // Clean up uploaded file on error
+            try {
+                await fs.unlink(file.path);
+            } catch (unlinkError) {
+                console.error('Error cleaning up file:', unlinkError.message);
+            }
+
+            // Update status: failed
+            this.processingStatus = {
+                ...this.processingStatus,
+                status: 'failed',
+                stage: 'failed',
+                progress: 0,
+                error: error.message,
+                errorDetails: this.getErrorDetails(error),
+                failedAt: Date.now()
+            };
         }
     }
 

@@ -202,7 +202,7 @@ class LogInterpreterUI {
         formData.append('groqModel', this.groqModel.value);
 
         this.showProgress();
-        this.setProcessing(true, 'Processing file upload...');
+        this.setProcessing(true, 'Starting file upload...');
 
         try {
             console.log('📡 Sending upload request...');
@@ -220,19 +220,15 @@ class LogInterpreterUI {
             }
 
             const result = await response.json();
-            console.log('✅ Upload successful:', result);
+            console.log('✅ Upload started:', result);
             
-            this.hideProgress();
-            this.setProcessing(false);
-            
-            // Ensure the file info shows the successful upload
-            this.uploadArea.style.display = 'none';
-            this.fileInfo.style.display = 'block';
-            
-            this.enableChat();
-            
-            const timeText = result.processingTime ? ` in ${result.processingTime.toFixed(1)}s` : '';
-            this.showSuccess(`File uploaded successfully! Loaded ${result.chunks} chunks${timeText}.`);
+            if (result.processingId) {
+                // Start polling for processing status
+                await this.pollProcessingStatus(result.processingId);
+            } else {
+                // Fallback for immediate completion (shouldn't happen with new implementation)
+                this.handleUploadComplete(result);
+            }
             
         } catch (error) {
             console.error('❌ Upload failed:', error);
@@ -248,26 +244,112 @@ class LogInterpreterUI {
         }
     }
 
+    async pollProcessingStatus(processingId) {
+        const maxAttempts = 120; // 2 minutes with 1-second intervals
+        let attempts = 0;
+        
+        const poll = async () => {
+            try {
+                attempts++;
+                console.log(`📊 Polling status (attempt ${attempts}/${maxAttempts})...`);
+                
+                const response = await fetch(`/api/upload-status/${processingId}`);
+                
+                if (!response.ok) {
+                    if (response.status === 404) {
+                        throw new Error('Processing session not found');
+                    }
+                    throw new Error(`Status check failed: ${response.statusText}`);
+                }
+                
+                const status = await response.json();
+                console.log('📈 Processing status:', status);
+                
+                // Update UI based on status
+                this.updateProcessingUI(status);
+                
+                if (status.status === 'completed') {
+                    console.log('✅ Processing completed!');
+                    this.handleUploadComplete(status);
+                    return;
+                }
+                
+                if (status.status === 'failed') {
+                    console.error('❌ Processing failed:', status.error);
+                    throw new Error(status.error || 'Processing failed');
+                }
+                
+                // Continue polling if still processing
+                if (status.status === 'processing' && attempts < maxAttempts) {
+                    setTimeout(poll, 1000); // Poll every second
+                } else if (attempts >= maxAttempts) {
+                    throw new Error('Processing timeout - please try again');
+                }
+                
+            } catch (error) {
+                console.error('❌ Status polling error:', error);
+                this.hideProgress();
+                this.setProcessing(false);
+                this.showUploadError('Processing failed: ' + error.message);
+                
+                // Reset UI to allow retry
+                this.uploadArea.style.display = 'block';
+                this.fileInfo.style.display = 'none';
+                this.uploadArea.style.cursor = 'pointer';
+                this.uploadArea.title = 'Click to retry upload or drag a new file';
+            }
+        };
+        
+        // Start polling
+        poll();
+    }
+    
+    updateProcessingUI(status) {
+        // Update progress bar based on actual progress
+        if (status.progress !== undefined) {
+            this.progressFill.style.width = status.progress + '%';
+            this.progressText.textContent = status.progress + '%';
+        }
+        
+        // Update processing message based on stage
+        const stageMessages = {
+            'initializing': 'Initializing upload...',
+            'recreating_index': 'Preparing vector database...',
+            'processing_file': 'Processing document...',
+            'loading_to_vector_store': 'Creating embeddings and indexing...',
+            'finalizing': 'Finalizing upload...',
+            'completed': 'Upload completed!'
+        };
+        
+        const message = stageMessages[status.stage] || 'Processing file...';
+        this.setProcessing(true, message);
+    }
+    
+    handleUploadComplete(result) {
+        this.hideProgress();
+        this.setProcessing(false);
+        
+        // Ensure the file info shows the successful upload
+        this.uploadArea.style.display = 'none';
+        this.fileInfo.style.display = 'block';
+        
+        this.enableChat();
+        
+        const timeText = result.processingTime ? ` in ${result.processingTime.toFixed(1)}s` : '';
+        const totalTimeText = result.totalTime ? ` (total: ${result.totalTime.toFixed(1)}s)` : '';
+        this.showSuccess(`File uploaded successfully! Loaded ${result.chunks} chunks${timeText}${totalTimeText}.`);
+    }
+
     showProgress() {
         this.uploadProgress.style.display = 'block';
         this.progressFill.style.width = '0%';
         this.progressText.textContent = '0%';
         
-        // Simulate progress
-        let progress = 0;
-        const interval = setInterval(() => {
-            progress += Math.random() * 15;
-            if (progress > 90) progress = 90;
-            
-            this.progressFill.style.width = progress + '%';
-            this.progressText.textContent = Math.round(progress) + '%';
-            
-            if (progress >= 90) {
-                clearInterval(interval);
-            }
-        }, 200);
-        
-        this.progressInterval = interval;
+        // Clear any existing progress interval
+        if (this.progressInterval) {
+            clearInterval(this.progressInterval);
+            this.progressInterval = null;
+        }
     }
 
     hideProgress() {
