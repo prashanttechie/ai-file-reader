@@ -82,7 +82,7 @@ sudo docker build -t log-interpreter-agent .
 
 #### Option A: Simple Single Container
 ```bash
-sudo docker run -p 3000:3000 --env-file .env log-interpreter-agent
+sudo docker run -p 3000:3000 --env-file .env --name ai-file-reader -e METRICS_ENABLED=true log-interpreter-agent
 ```
 
 #### Option B: Networked Setup with Nginx
@@ -92,7 +92,7 @@ sudo docker network create app-network
 
 # Run application container
 sudo docker run -d \
-  --name myapp \
+  --name ai-file-reader-network \
   --network app-network \
   --env-file .env \
   log-interpreter-agent
@@ -137,7 +137,8 @@ sudo docker logs -f myapp  # Follow logs
 ```bash
 sudo docker restart myapp
 ```
-
+# solve - Error response from daemon: network with name app-network already exists
+```sudo docker network rm app-network```
 ## 📝 Notes
 
 - Replace `<repo_url>` with your actual repository URL

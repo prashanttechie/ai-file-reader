@@ -4,12 +4,15 @@ datasources:
   - name: Prometheus
     type: prometheus
     access: proxy
-    url: http://prometheus:9090
+    url: http://ai-file-reader-prometheus:9090
     isDefault: true
     editable: true
+    jsonData:
+      timeInterval: 15s
 
   - name: Loki
     type: loki
     access: proxy
-    url: http://loki:3100
+    url: http://ai-file-reader-loki:3100
+    isDefault: false
     editable: true

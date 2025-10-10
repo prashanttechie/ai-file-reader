@@ -17,6 +17,7 @@ services:
       - '--web.enable-lifecycle'
     networks:
       - monitoring
+      - app-network
 
   # Grafana
   grafana:
@@ -34,6 +35,7 @@ services:
       - GF_USERS_ALLOW_SIGN_UP=false
     networks:
       - monitoring
+      - app-network
 
   # Loki for Log Aggregation
   loki:
@@ -47,6 +49,7 @@ services:
     command: -config.file=/etc/loki/local-config.yaml
     networks:
       - monitoring
+      - app-network
 
   # Promtail for Log Collection
   promtail:
@@ -60,6 +63,7 @@ services:
     command: -config.file=/etc/promtail/config.yml
     networks:
       - monitoring
+      - app-network
 
   # Node Exporter for System Metrics
   node-exporter:
@@ -78,6 +82,7 @@ services:
       - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
     networks:
       - monitoring
+      - app-network
 
 volumes:
   prometheus_data:
@@ -88,3 +93,5 @@ volumes:
 networks:
   monitoring:
     driver: bridge
+  app-network:
+    external: true
